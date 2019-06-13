@@ -32,7 +32,7 @@
 -type params() :: [json()] | {[{binary(), json()}]}.
 -type id() :: number() | null.
 -type errortype() :: parse_error | method_not_found | invalid_params |
-                     internal_error | server_error.
+                     internal_error | server_error | invalid_request.
 -type error() :: errortype() | {errortype(), json()} | {jsonrpc2, integer(), binary()} |
                  {jsonrpc2, integer(), binary(), json()}.
 -type request() :: {method(), params(), id() | undefined} | invalid_request.
