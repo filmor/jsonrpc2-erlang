@@ -128,7 +128,7 @@ binary message and optional data.
 
 If any other exception is thrown or an error occurs in the handler, this is
 caught, an error message is logged (using the standard error logger
-`error_logger:error_msg/2`) and an "Internal error" response is returned.
+`logger:error/2`) and an "Internal error" response is returned.
 
 If you're working with already parsed JSON, i.e. you're using `handle/2` or
 `handle/3`, you may want to produce an error message that you can use when the

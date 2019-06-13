@@ -23,6 +23,8 @@
 %% parsers.
 -module(jsonrpc2).
 
+-include_lib("kernel/include/logger.hrl").
+
 -export([handle/2, handle/3, handle/4, handle/5, parseerror/0]).
 
 -type json() :: true | false | null | binary() | [json()] | {[{binary(), json()}]}.
@@ -72,8 +74,7 @@ handle(Req, HandlerFun, MapFun, JsonDecode, JsonEncode)
             try JsonEncode(Reply) of
                 EncodedReply -> {reply, EncodedReply}
             catch _:_ ->
-                error_logger:error_msg("Failed encoding reply as JSON: ~p",
-                                       [Reply]),
+                ?LOG_ERROR("Failed encoding reply as JSON: ~p", [Reply]),
                 {reply, Error} = make_standard_error_response(internal_error, null),
                 {reply, JsonEncode(Error)}
             end
@@ -208,10 +209,11 @@ dispatch({Method, Params, Id}, HandlerFun) ->
         throw:{jsonrpc2, Code, Message, Data} when is_integer(Code), is_binary(Message) ->
             %% Custom error, with data
             make_error_response(Code, Message, Data, Id);
-        Class:Error ->
-            error_logger:error_msg(
+        Class:Error:Stacktrace ->
+            ?LOG_ERROR(
                 "Error in JSON-RPC handler for method ~s with params ~p (id: ~p): ~p:~p from ~p",
-                [Method, Params, Id, Class, Error, erlang:get_stacktrace()]),
+                [Method, Params, Id, Class, Error, Stacktrace]
+            ),
             make_standard_error_response(internal_error, Id)
     end;
 dispatch(_, _HandlerFun) ->
