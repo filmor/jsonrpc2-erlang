@@ -15,6 +15,11 @@
 %% @doc JSON-RPC 2.0 client
 -module(jsonrpc2_client).
 
+-ignore_xref([
+	batch_call/5,
+	create_request/1,
+	parse_response/1
+]).
 -export_type([request/0, response/0]).
 -export([create_request/1, parse_response/1, batch_call/5]).
 

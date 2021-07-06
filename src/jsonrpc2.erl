@@ -25,6 +25,13 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+-ignore_xref([
+    handle/2,
+    handle/3,
+    handle/4,
+    handle/5,
+    parseerror/0
+]).
 -export([handle/2, handle/3, handle/4, handle/5, parseerror/0]).
 
 -type json() :: true | false | null | binary() | [json()] | {[{binary(), json()}]}.
