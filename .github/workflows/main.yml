@@ -19,6 +19,9 @@ jobs:
           
     - uses: actions/checkout@v2
 
+    - name: Check format
+      run: rebar3 fmt --check
+
     - name: Run build and xref
       run: rebar3 xref
 
