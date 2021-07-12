@@ -13,9 +13,9 @@ jobs:
     
     steps:
     - name: Setup Erlang
-      uses: gleam-lang/setup-erlang@v1.1.0
+      uses: gleam-lang/setup-erlang@v1.1.2
       with:
-        otp-version: 22.3
+        otp-version: "24.0"
           
     - uses: actions/checkout@v2
 
@@ -28,8 +28,8 @@ jobs:
     - name: Run unit tests
       run: rebar3 eunit
 
-    - name: Run Common Test
-      run: rebar3 ct
+    # - name: Run Common Test
+    #   run: rebar3 ct
 
     - name: Run Dialyzer
       run: rebar3 dialyzer
