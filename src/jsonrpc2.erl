@@ -32,11 +32,14 @@
     handle/5,
     parseerror/0
 ]).
--export([handle/2, handle/3, handle/4, handle/5, parseerror/0]).
+-export([handle/2, handle/3, handle/4, handle/5, parse_error/0]).
 
--type json() :: true | false | null | binary() | [json()] | {[{binary(), json()}]}.
+-type json_value() :: true | false | null | binary() | number().
+-type json() :: json_value() | [json()] | #{json() => json()}.
+-type json_ordered() :: json() | [#{json() => json_ordered()}].
+
 -type method() :: binary().
--type params() :: [json()] | {[{binary(), json()}]}.
+-type params() :: [json()] | #{binary() => json()}.
 -type id() :: number() | null.
 -type errortype() ::
     parse_error
@@ -53,17 +56,23 @@
 -type request() :: {method(), params(), id() | undefined} | invalid_request.
 -type response() :: {reply, json()} | noreply.
 
--type handlerfun() :: fun((method(), params()) -> json()).
+-type handler_fun() :: fun((method(), params()) -> json()).
 % should be the same as lists:map/2
--type mapfun() :: fun((fun((A) -> B), [A]) -> [B]).
+-type map_fun() :: fun((fun((A) -> B), [A]) -> [B]).
+-type encode_fun() :: fun((json()) -> binary()).
+-type decode_fun() :: fun((binary()) -> json()).
 
 -export_type([
     json/0,
     method/0,
     params/0,
     id/0,
-    handlerfun/0,
-    mapfun/0,
+
+    handler_fun/0,
+    map_fun/0,
+    encode_fun/0,
+    decode_fun/0,
+
     response/0,
     errortype/0,
     error/0
@@ -71,7 +80,7 @@
 
 %% @doc Handles a raw JSON-RPC request, using the supplied JSON decode and
 %% encode functions.
--spec handle(Req :: term(), handlerfun(), JsonDecode :: fun(), JsonEncode :: fun()) ->
+-spec handle(Req :: term(), handler_fun(), decode_fun(), encode_fun()) ->
     noreply | {reply, term()}.
 handle(Req, HandlerFun, JsonDecode, JsonEncode) when
     is_function(HandlerFun, 2),
@@ -84,10 +93,10 @@ handle(Req, HandlerFun, JsonDecode, JsonEncode) when
 %% encode functions and a custom map function.
 -spec handle(
     Req :: term(),
-    handlerfun(),
-    mapfun(),
-    JsonDecode :: fun(),
-    JsonEncode :: fun()
+    handler_fun(),
+    map_fun(),
+    decode_fun(),
+    encode_fun()
 ) -> noreply | {reply, term()}.
 handle(Req, HandlerFun, MapFun, JsonDecode, JsonEncode) when
     is_function(HandlerFun, 2),
@@ -99,7 +108,7 @@ handle(Req, HandlerFun, MapFun, JsonDecode, JsonEncode) when
         try JsonDecode(Req) of
             DecodedJson -> handle(DecodedJson, HandlerFun, MapFun)
         catch
-            _:_ -> {reply, parseerror()}
+            _:_ -> {reply, parse_error()}
         end,
     case Response of
         noreply ->
@@ -120,14 +129,14 @@ handle(Req, HandlerFun, MapFun, JsonDecode, JsonEncode) when
 %% decoding, the request must be JSON decoded before passing it to this
 %% function. Likewise, if a reply is returned, it should be JSON encoded before
 %% sending it to the client.
--spec handle(json(), handlerfun()) -> response().
+-spec handle(json(), handler_fun()) -> response().
 handle(Req, HandlerFun) ->
     handle(Req, HandlerFun, fun lists:map/2).
 
 %% @doc Handles the requests using the handler function and a custom map
 %% function for batch requests. The map function should be compatible with
 %% lists:map/2. This is useful for concurrent processing of batch requests.
--spec handle(json(), handlerfun(), mapfun()) -> response().
+-spec handle(json(), handler_fun(), map_fun()) -> response().
 handle(Req, HandlerFun, MapFun) ->
     case parse(Req) of
         BatchRpc when is_list(BatchRpc), length(BatchRpc) > 0 ->
@@ -143,8 +152,8 @@ handle(Req, HandlerFun, MapFun) ->
 %% the case when the client sends invalid JSON. This function is exported for
 %% completeness, since the JSON encoding and decoding is not handled by this
 %% module.
--spec parseerror() -> json().
-parseerror() ->
+-spec parse_error() -> json().
+parse_error() ->
     make_error(-32700, <<"Parse error.">>, null).
 
 %% helpers
@@ -153,12 +162,11 @@ parseerror() ->
 make_result_response(_Result, undefined) ->
     noreply;
 make_result_response(Result, Id) ->
-    {reply,
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"result">>, Result},
-            {<<"id">>, Id}
-        ]}}.
+    {reply, [
+        {<<"jsonrpc">>, <<"2.0">>},
+        {<<"result">>, Result},
+        {<<"id">>, Id}
+    ]}.
 
 -spec make_standard_error_response(errortype(), id() | undefined) -> response().
 make_standard_error_response(ErrorType, Id) ->
@@ -185,31 +193,29 @@ make_error_response(Code, Message, Id) ->
     {reply, make_error(Code, Message, Id)}.
 
 %% @doc Make json-rpc error response, with data
--spec make_error(integer(), binary(), json(), id()) -> json().
+-spec make_error(integer(), binary(), json(), id()) -> json_ordered().
 make_error(Code, Msg, Data, Id) ->
-    {[
+    [
         {<<"jsonrpc">>, <<"2.0">>},
-        {<<"error">>,
-            {[
-                {<<"code">>, Code},
-                {<<"message">>, Msg},
-                {<<"data">>, Data}
-            ]}},
+        {<<"error">>, [
+            {<<"code">>, Code},
+            {<<"message">>, Msg},
+            {<<"data">>, Data}
+        ]},
         {<<"id">>, Id}
-    ]}.
+    ].
 
 %% @doc Make json-rpc error response, without data
--spec make_error(integer(), binary(), id()) -> json().
+-spec make_error(integer(), binary(), id()) -> json_ordered().
 make_error(Code, Msg, Id) ->
-    {[
+    [
         {<<"jsonrpc">>, <<"2.0">>},
-        {<<"error">>,
-            {[
-                {<<"code">>, Code},
-                {<<"message">>, Msg}
-            ]}},
+        {<<"error">>, [
+            {<<"code">>, Code},
+            {<<"message">>, Msg}
+        ]},
         {<<"id">>, Id}
-    ]}.
+    ].
 
 %% @doc Parses the RPC part of an already JSON decoded request. Returns a tuple
 %% {Method, Params, Id} for a single request, 'invalid_request' for an invalid
@@ -218,15 +224,18 @@ make_error(Code, Msg, Id) ->
 -spec parse(json()) -> request() | [request()].
 parse(Reqs) when is_list(Reqs) ->
     [parse(Req) || Req <- Reqs];
-parse({Req}) ->
-    Version = proplists:get_value(<<"jsonrpc">>, Req),
-    Method = proplists:get_value(<<"method">>, Req),
-    Params = proplists:get_value(<<"params">>, Req, []),
-    Id = proplists:get_value(<<"id">>, Req, undefined),
+parse(
+    #{
+        <<"jsonrpc">> := Version,
+        <<"method">> := Method
+    } = Req
+) ->
+    Params = maps:get(<<"params">>, Req, []),
+    Id = maps:get(<<"id">>, Req, undefined),
     case
         Version =:= <<"2.0">> andalso
             is_binary(Method) andalso
-            (is_list(Params) orelse is_tuple(Params)) andalso
+            (is_list(Params) orelse is_map(Params)) andalso
             (Id =:= undefined orelse Id =:= null orelse
                 is_binary(Id) orelse
                 is_number(Id))
@@ -240,7 +249,7 @@ parse(_) ->
     invalid_request.
 
 %% @doc Calls the handler function, catches errors and composes a json-rpc response.
--spec dispatch(request(), handlerfun()) -> response().
+-spec dispatch(request(), handler_fun()) -> response().
 dispatch({Method, Params, Id}, HandlerFun) ->
     try HandlerFun(Method, Params) of
         Response -> make_result_response(Response, Id)
@@ -297,112 +306,149 @@ merge_responses(Responses) when is_list(Responses) ->
 
 %% Testing the examples from http://www.jsonrpc.org/specification
 
-test_handler(<<"subtract">>, [42, 23]) -> 19;
-test_handler(<<"subtract">>, [23, 42]) -> -19;
-test_handler(<<"subtract">>, {[{<<"subtrahend">>, 23}, {<<"minuend">>, 42}]}) -> 19;
-test_handler(<<"subtract">>, {[{<<"minuend">>, 42}, {<<"subtrahend">>, 23}]}) -> 19;
+test_handler(<<"subtract">>, [L, R]) -> L - R;
+test_handler(<<"subtract">>, #{<<"minuend">> := L, <<"subtrahend">> := R}) -> L - R;
 test_handler(<<"update">>, [1, 2, 3, 4, 5]) -> ok;
-test_handler(<<"sum">>, [1, 2, 4]) -> 7;
+test_handler(<<"sum">>, L) -> lists:sum(L);
 test_handler(<<"get_data">>, []) -> [<<"hello">>, 5];
 test_handler(_, _) -> throw(method_not_found).
 
 %% rpc call with positional parameters
 call_test() ->
     Req =
-        {[
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"subtract">>,
+            <<"params">> => [42, 23],
+            <<"id">> => 1
+        },
+    ?assertMatch(
+        {reply, [
             {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"subtract">>},
-            {<<"params">>, [42, 23]},
+            {<<"result">>, 19},
             {<<"id">>, 1}
         ]},
-    Reply = {[{<<"jsonrpc">>, <<"2.0">>}, {<<"result">>, 19}, {<<"id">>, 1}]},
-    {reply, Reply} = handle(Req, fun test_handler/2).
+        handle(Req, fun test_handler/2)
+    ).
 
 %% rpc call with positional parameters, reverse order
 call2_test() ->
     Req =
-        {[
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"subtract">>,
+            <<"params">> => [23, 42],
+            <<"id">> => 2
+        },
+    ?assertMatch(
+        {reply, [
             {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"subtract">>},
-            {<<"params">>, [23, 42]},
+            {<<"result">>, -19},
             {<<"id">>, 2}
         ]},
-    Reply = {[{<<"jsonrpc">>, <<"2.0">>}, {<<"result">>, -19}, {<<"id">>, 2}]},
-    {reply, Reply} = handle(Req, fun test_handler/2).
+        handle(Req, fun test_handler/2)
+    ).
 
 %% rpc call with named parameters
 named_test() ->
     Req =
-        {[
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"subtract">>,
+            <<"params">> => #{
+                <<"subtrahend">> => 23,
+                <<"minuend">> => 42
+            },
+            <<"id">> => 3
+        },
+    ?assertMatch(
+        {reply, [
             {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"subtract">>},
-            {<<"params">>, {[{<<"subtrahend">>, 23}, {<<"minuend">>, 42}]}},
+            {<<"result">>, 19},
             {<<"id">>, 3}
         ]},
-    Reply = {[{<<"jsonrpc">>, <<"2.0">>}, {<<"result">>, 19}, {<<"id">>, 3}]},
-    {reply, Reply} = handle(Req, fun test_handler/2).
+        handle(Req, fun test_handler/2)
+    ).
 
 %% rpc call with named parameters, reverse order
 named2_test() ->
     Req =
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"subtract">>},
-            {<<"params">>, {[{<<"minuend">>, 42}, {<<"subtrahend">>, 23}]}},
-            {<<"id">>, 4}
-        ]},
-    Reply = {[{<<"jsonrpc">>, <<"2.0">>}, {<<"result">>, 19}, {<<"id">>, 4}]},
-    {reply, Reply} = handle(Req, fun test_handler/2).
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"subtract">>,
+            <<"params">> => #{<<"minuend">> => 42, <<"subtrahend">> => 23},
+            <<"id">> => 4
+        },
+    ?assertMatch(
+        {reply, [{<<"jsonrpc">>, <<"2.0">>}, {<<"result">>, 19}, {<<"id">>, 4}]},
+        handle(Req, fun test_handler/2)
+    ).
 
 %% a Notification
 notif_test() ->
     Req =
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"update">>},
-            {<<"params">>, [1, 2, 3, 4, 5]}
-        ]},
-    noreply = handle(Req, fun test_handler/2).
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"update">>,
+            <<"params">> => [1, 2, 3, 4, 5]
+        },
+    ?assertMatch(
+        noreply,
+        handle(Req, fun test_handler/2)
+    ).
 
 %% a Notification + non-existent method
 notif2_test() ->
-    Req = {[{<<"jsonrpc">>, <<"2.0">>}, {<<"method">>, <<"foobar">>}]},
-    noreply = handle(Req, fun test_handler/2).
+    Req = #{<<"jsonrpc">> => <<"2.0">>, <<"method">> => <<"foobar">>},
+    ?assertMatch(
+        noreply,
+        handle(Req, fun test_handler/2)
+    ).
 
 %% rpc call of non-existent method
 bad_method_test() ->
-    Req = {[{<<"jsonrpc">>, <<"2.0">>}, {<<"method">>, <<"foobar">>}, {<<"id">>, <<"1">>}]},
-    Reply =
-        {[
+    Req = #{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"method">> => <<"foobar">>,
+        <<"id">> => <<"1">>
+    },
+    ?assertMatch(
+        {reply, [
             {<<"jsonrpc">>, <<"2.0">>},
-            {<<"error">>, {[{<<"code">>, -32601}, {<<"message">>, <<"Method not found.">>}]}},
+            {<<"error">>, [{<<"code">>, -32601}, {<<"message">>, <<"Method not found.">>}]},
             {<<"id">>, <<"1">>}
         ]},
-    {reply, Reply} = handle(Req, fun test_handler/2).
+        handle(Req, fun test_handler/2)
+    ).
 
 %% rpc call with invalid JSON
 %% Not applicable, since JSON parsing is not done in this module. We test the error
 %% response though.
 bad_json_test() ->
-    Expected =
-        {[
+    ?assertMatch(
+        [
             {<<"jsonrpc">>, <<"2.0">>},
-            {<<"error">>, {[{<<"code">>, -32700}, {<<"message">>, <<"Parse error.">>}]}},
+            {<<"error">>, [{<<"code">>, -32700}, {<<"message">>, <<"Parse error.">>}]},
             {<<"id">>, null}
-        ]},
-    Reply = parseerror(),
-    Reply = Expected.
+        ],
+        parse_error()
+    ).
 
 %% rpc call with invalid Request object
 bad_rpc_test() ->
-    Req = {[{<<"jsonrpc">>, <<"2.0">>}, {<<"method">>, 1}, {<<"params">>, <<"bar">>}]},
-    Reply =
-        {[
+    Req = #{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"method">> => 1,
+        <<"params">> => <<"bar">>
+    },
+    ?assertMatch(
+        {reply, [
             {<<"jsonrpc">>, <<"2.0">>},
-            {<<"error">>, {[{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]}},
+            {<<"error">>, [{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]},
             {<<"id">>, null}
         ]},
-    {reply, Reply} = handle(Req, fun test_handler/2).
+        handle(Req, fun test_handler/2)
+    ).
 
 %% rpc call Batch, invalid JSON:
 %% Not applicable, see bad_json_test/0 above.
@@ -412,117 +458,124 @@ bad_json_batch_test() ->
 %% rpc call with an empty Array
 empty_batch_test() ->
     Req = [],
-    Reply =
-        {[
+    ?assertMatch(
+        {reply, [
             {<<"jsonrpc">>, <<"2.0">>},
-            {<<"error">>, {[{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]}},
+            {<<"error">>, [{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]},
             {<<"id">>, null}
         ]},
-    {reply, Reply} = handle(Req, fun test_handler/2).
+        handle(Req, fun test_handler/2)
+    ).
 
 %% rpc call with an invalid Batch (but not empty)
 invalid_batch_test() ->
     Req = [1],
-    Reply = [
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"error">>, {[{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]}},
-            {<<"id">>, null}
-        ]}
-    ],
-    {reply, Reply} = handle(Req, fun test_handler/2).
+    ?assertMatch(
+        {reply, [
+            [
+                {<<"jsonrpc">>, <<"2.0">>},
+                {<<"error">>, [{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]},
+                {<<"id">>, null}
+            ]
+        ]},
+        handle(Req, fun test_handler/2)
+    ).
 
 %% rpc call with invalid Batch
 invalid_batch2_test() ->
     Req = [1, 2, 3],
-    Reply = [
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"error">>, {[{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]}},
-            {<<"id">>, null}
+    ?assertMatch(
+        {reply, [
+            [
+                {<<"jsonrpc">>, <<"2.0">>},
+                {<<"error">>, [{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]},
+                {<<"id">>, null}
+            ],
+            [
+                {<<"jsonrpc">>, <<"2.0">>},
+                {<<"error">>, [{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]},
+                {<<"id">>, null}
+            ],
+            [
+                {<<"jsonrpc">>, <<"2.0">>},
+                {<<"error">>, [{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]},
+                {<<"id">>, null}
+            ]
         ]},
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"error">>, {[{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]}},
-            {<<"id">>, null}
-        ]},
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"error">>, {[{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]}},
-            {<<"id">>, null}
-        ]}
-    ],
-    {reply, Reply} = handle(Req, fun test_handler/2).
+        handle(Req, fun test_handler/2)
+    ).
 
 %% rpc call Batch
 batch_test() ->
     Req = [
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"sum">>},
-            {<<"params">>, [1, 2, 4]},
-            {<<"id">>, <<"1">>}
-        ]},
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"notify_hello">>},
-            {<<"params">>, [7]}
-        ]},
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"subtract">>},
-            {<<"params">>, [42, 23]},
-            {<<"id">>, <<"2">>}
-        ]},
-        {[{<<"foo">>, <<"boo">>}]},
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"foo.get">>},
-            {<<"params">>, {[{<<"name">>, <<"myself">>}]}},
-            {<<"id">>, <<"5">>}
-        ]},
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"get_data">>},
-            {<<"id">>, <<"9">>}
-        ]}
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"sum">>,
+            <<"params">> => [1, 2, 4],
+            <<"id">> => <<"1">>
+        },
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"notify_hello">>,
+            <<"params">> => [7]
+        },
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"subtract">>,
+            <<"params">> => [42, 23],
+            <<"id">> => <<"2">>
+        },
+        #{<<"foo">> => <<"boo">>},
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"foo.get">>,
+            <<"params">> => #{<<"name">> => <<"myself">>},
+            <<"id">> => <<"5">>
+        },
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"get_data">>,
+            <<"id">> => <<"9">>
+        }
     ],
-    Reply = [
-        {[{<<"jsonrpc">>, <<"2.0">>}, {<<"result">>, 7}, {<<"id">>, <<"1">>}]},
-        {[{<<"jsonrpc">>, <<"2.0">>}, {<<"result">>, 19}, {<<"id">>, <<"2">>}]},
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"error">>, {[{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]}},
-            {<<"id">>, null}
+    ?assertMatch(
+        {reply, [
+            [{<<"jsonrpc">>, <<"2.0">>}, {<<"result">>, 7}, {<<"id">>, <<"1">>}],
+            [{<<"jsonrpc">>, <<"2.0">>}, {<<"result">>, 19}, {<<"id">>, <<"2">>}],
+            [
+                {<<"jsonrpc">>, <<"2.0">>},
+                {<<"error">>, [{<<"code">>, -32600}, {<<"message">>, <<"Invalid Request.">>}]},
+                {<<"id">>, null}
+            ],
+            [
+                {<<"jsonrpc">>, <<"2.0">>},
+                {<<"error">>, [{<<"code">>, -32601}, {<<"message">>, <<"Method not found.">>}]},
+                {<<"id">>, <<"5">>}
+            ],
+            [
+                {<<"jsonrpc">>, <<"2.0">>},
+                {<<"result">>, [<<"hello">>, 5]},
+                {<<"id">>, <<"9">>}
+            ]
         ]},
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"error">>, {[{<<"code">>, -32601}, {<<"message">>, <<"Method not found.">>}]}},
-            {<<"id">>, <<"5">>}
-        ]},
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"result">>, [<<"hello">>, 5]},
-            {<<"id">>, <<"9">>}
-        ]}
-    ],
-    {reply, Reply} = handle(Req, fun test_handler/2).
+        handle(Req, fun test_handler/2)
+    ).
 
 %% rpc call Batch (all notifications)
 batch_notif_test() ->
     Req = [
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"notify_sum">>},
-            {<<"params">>, [1, 2, 4]}
-        ]},
-        {[
-            {<<"jsonrpc">>, <<"2.0">>},
-            {<<"method">>, <<"notify_hello">>},
-            {<<"params">>, [7]}
-        ]}
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"notify_sum">>,
+            <<"params">> => [1, 2, 4]
+        },
+        #{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"notify_hello">>,
+            <<"params">> => [7]
+        }
     ],
-    noreply = handle(Req, fun test_handler/2).
+    ?assertMatch(noreply, handle(Req, fun test_handler/2)).
 
 -define(ENCODED_REQUEST, <<
     "{\"jsonrpc\":\"2.0\","
@@ -530,48 +583,17 @@ batch_notif_test() ->
     "\"params\":[42,23],"
     "\"id\":1}"
 >>).
--define(DECODED_REQUEST,
-    {[
-        {<<"jsonrpc">>, <<"2.0">>},
-        {<<"method">>, <<"subtract">>},
-        {<<"params">>, [42, 23]},
-        {<<"id">>, 1}
-    ]}
-).
 -define(ENCODED_RESPONSE, <<
     "{\"jsonrpc\":\"2.0\","
     "\"result\":19,"
     "\"id\":1}"
 >>).
--define(DECODED_RESPONSE,
-    {[
-        {<<"jsonrpc">>, <<"2.0">>},
-        {<<"result">>, 19},
-        {<<"id">>, 1}
-    ]}
-).
 -define(ENCODED_PARSE_ERROR, <<
     "{\"jsonrpc\":\"2.0\","
     "\"error\":{\"code\":-32700,"
     "\"message\":\"Parse error.\"},"
     "\"id\":null}"
 >>).
--define(DECODED_PARSE_ERROR,
-    {[
-        {<<"jsonrpc">>, <<"2.0">>},
-        {<<"error">>,
-            {[
-                {<<"code">>, -32700},
-                {<<"message">>, <<"Parse error.">>}
-            ]}},
-        {<<"id">>, null}
-    ]}
-).
-
-%% define json encode and decode only for the cases we need in the tests
-json_decode(?ENCODED_REQUEST) -> ?DECODED_REQUEST.
-json_encode(?DECODED_RESPONSE) -> ?ENCODED_RESPONSE;
-json_encode(?DECODED_PARSE_ERROR) -> ?ENCODED_PARSE_ERROR.
 
 %% test handle/4 with encode and decode callbacks
 json_callbacks_test() ->
@@ -580,8 +602,8 @@ json_callbacks_test() ->
     {reply, Reply} = handle(
         Req,
         fun test_handler/2,
-        fun json_decode/1,
-        fun json_encode/1
+        fun jsone:decode/1,
+        fun jsone:encode/1
     ).
 
 parse_error_test() ->
@@ -589,8 +611,8 @@ parse_error_test() ->
     {reply, Error} = handle(
         <<"dummy">>,
         fun test_handler/2,
-        fun json_decode/1,
-        fun json_encode/1
+        fun jsone:decode/1,
+        fun jsone:encode/1
     ).
 
 -endif.

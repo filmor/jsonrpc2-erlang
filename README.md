@@ -46,13 +46,13 @@ Types
 -----
 
 ```Erlang
-json() :: true | false | null | binary() | [json()] | {[{binary(), json()}]}.
+json() :: true | false | null | binary() | [json()] | #{binary() => json()}.
 
-handlerfun() :: fun((method(), params()) -> json()).
+handler_fun() :: fun((method(), params()) -> json()).
 method() :: binary().
 params() :: [json()] | {[{binary(), json()}]}.
 
-mapfun() :: fun((fun((A) -> B), [A]) -> [B]). %% the same as lists:map/2
+map_fun() :: fun((fun((A) -> B), [A]) -> [B]). %% the same as lists:map/2
 ```
 
 Functions
@@ -67,14 +67,14 @@ representation explained on the page https://github.com/davisp/jiffy#data-format
 as required by jiffy and other compatible JSON parses.
 
 ```Erlang
-handle(json(), handlerfun()) -> {reply, json()} | noreply
+handle(json(), handler_fun()) -> {reply, json()} | noreply
 ```
 
 Handles decoded JSON and returns a reply as decoded JSON or noreply. Use
 this if you want to handle JSON encoding separately.
 
 ```Erlang
-handle(json(), handlerfun(), mapfun()) -> {reply, json()} | noreply
+handle(json(), handler_fun(), mapfun()) -> {reply, json()} | noreply
 ```
 
 Like `handle/2`, handles decoded JSON, but takes an extra
@@ -84,7 +84,7 @@ similarly to `lists:map/2`, such as the `plists:map/2`
 from the plists library for concurrent batch handling.
 
 ```Erlang
-handle(Req::term(), handlerfun(), JsonDecode::fun(), JsonEncode::fun()) ->
+handle(Req::term(), handler_fun(), JsonDecode::fun(), JsonEncode::fun()) ->
     {reply, term()} | noreply
 ```
 
@@ -92,7 +92,7 @@ Handles JSON as binary or string. Uses the supplied functions
 JsonDecode to parse the JSON request and JsonEncode to encode the reply as JSON.
 
 ```Erlang
-handle(Req::term(), handlerfun(), mapfun(), JsonDecode::fun(),
+handle(Req::term(), handler_fun(), map_fun(), JsonDecode::fun(),
     JsonEncode::fun()) -> {reply, term()} | noreply
 ```
 
@@ -139,7 +139,7 @@ Examples:
 
 ```erlang
 my_handler(<<"Foo">>, [X, Y]) when is_integer(X), is_integer(Y) ->
-    {[{<<"Foo says">>}, X + Y + 42}]};
+    [{<<"Foo says">>}, X + Y + 42}];
 my_handler(<<"Foo">>, _SomeOtherParams) ->
     throw(invalid_params);
 my_handler(<<"Logout">>, [Username]) ->
@@ -151,9 +151,10 @@ my_handler(_SomeOtherMethod, _) ->
 Compatible JSON parsers
 -----------------------
 
-* Jiffy, https://github.com/davisp/jiffy
-* erlang-json, https://github.com/hio/erlang-json
-* Mochijson2 using ```mochijson2:decode(Bin, [{format, eep18}])```
+The JSON parser has to return `maps`, compatible parsers are:
+
+* jsone, https://hex.pm/packages/jsone
+* jsx, https://hex.pm/packages/jsx, either a relatively recent version or by using `fun (Bin) -> jsx:decode(Bin, [return_maps])` explicitely
 * Probably more...
 
 Links
@@ -168,6 +169,7 @@ License
 
 ```
 Copyright 2013-2014 Viktor Söderqvist
+Copyright 2021 Benedikt Reinartz
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

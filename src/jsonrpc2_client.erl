@@ -119,13 +119,13 @@ batch_call(MethodsAndParams, TransportFun, JsonDecode, JsonEncode, FirstId) ->
 %% @doc Helper for parse_response/1. Returns a single pair {Id, Response}.
 -spec parse_single_response(jsonrpc2:json()) -> {jsonrpc2:id(), response()}.
 parse_single_response({Response}) ->
-    <<"2.0">> == proplists:get_value(<<"jsonrpc">>, Response) orelse
+    <<"2.0">> == maps:get(<<"jsonrpc">>, Response) orelse
         throw(invalid_jsonrpc_response),
-    Id = proplists:get_value(<<"id">>, Response),
+    Id = maps:get(<<"id">>, Response),
     is_number(Id) orelse Id == null orelse
         throw(invalid_jsonrpc_response),
-    Result = proplists:get_value(<<"result">>, Response, undefined),
-    Error = proplists:get_value(<<"error">>, Response, undefined),
+    Result = maps:get(<<"result">>, Response, undefined),
+    Error = maps:get(<<"error">>, Response, undefined),
     Reply =
         case {Result, Error} of
             {undefined, undefined} ->
@@ -133,10 +133,10 @@ parse_single_response({Response}) ->
             {_, undefined} ->
                 {ok, Result};
             {undefined, {ErrorProplist}} ->
-                Code = proplists:get_value(<<"code">>, ErrorProplist, -32000),
-                Message = proplists:get_value(<<"message">>, ErrorProplist, <<"Unknown error">>),
+                Code = maps:get(<<"code">>, ErrorProplist, -32000),
+                Message = maps:get(<<"message">>, ErrorProplist, <<"Unknown error">>),
                 ErrorTuple =
-                    case proplists:get_value(<<"data">>, ErrorProplist) of
+                    case maps:get(<<"data">>, ErrorProplist) of
                         undefined ->
                             {jsonrpc2, Code, Message};
                         Data ->
@@ -183,30 +183,33 @@ denumerate_replies(_, _, _, Acc) ->
 enumerate_call_tuples_test() ->
     Input = [{x, foo}, {y, bar}, {z, baz}],
     FirstId = 3,
-    Expect = [{x, foo, 3}, {y, bar, 4}, {z, baz, 5}],
-    Expect = enumerate_call_tuples(Input, FirstId).
+    ?assertMatch(
+        [{x, foo, 3}, {y, bar, 4}, {z, baz, 5}],
+        enumerate_call_tuples(Input, FirstId)
+    ).
 
 denumerate_replies_test() ->
     Input = [{3, foo}, {5, baz}, {4, bar}],
     FirstId = 3,
     LastId = 5 = FirstId + length(Input) - 1,
-    Expect = [foo, bar, baz],
-    Expect = denumerate_replies(Input, FirstId, LastId).
+    ?assertMatch([foo, bar, baz], denumerate_replies(Input, FirstId, LastId)).
 
 transport_error_test() ->
     TransportFun = fun(_) -> throw({transport_error, <<"404 or whatever">>}) end,
     JsonEncode = fun(_) -> <<"foo">> end,
     JsonDecode = fun(_) -> [] end,
     MethodsAndParams = [{<<"foo">>, []}],
-    Expect = [{error, {server_error, <<"404 or whatever">>}}],
-    ?assertEqual(Expect, batch_call(MethodsAndParams, TransportFun, JsonDecode, JsonEncode, 1)).
+    ?assertMatch(
+        [{error, {server_error, <<"404 or whatever">>}}],
+        batch_call(MethodsAndParams, TransportFun, JsonDecode, JsonEncode, 1)
+    ).
 
 transport_return_invalid_json_test() ->
     TransportFun = fun(_) -> <<"some non-JSON junk">> end,
-    JsonEncode = fun(_) -> <<"{\"foo\":\"bar\"}">> end,
-    JsonDecode = fun(_) -> throw(invalid_json) end,
     MethodsAndParams = [{<<"foo">>, []}],
-    Expect = [{error, {server_error, invalid_json}}],
-    ?assertEqual(Expect, batch_call(MethodsAndParams, TransportFun, JsonDecode, JsonEncode, 1)).
+    ?assertMatch(
+        [{error, {server_error, invalid_json}}],
+        batch_call(MethodsAndParams, TransportFun, fun jsone:decode/1, fun jsone:encode/1, 1)
+    ).
 
 -endif.
